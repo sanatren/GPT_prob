@@ -6,6 +6,7 @@ from langchain_core.messages import HumanMessage
 import json
 from datetime import datetime, timedelta
 from langchain.chat_models import ChatOpenAI
+from langchain_community.chat_models import ChatOpenAI
 
 # Adjust Python path to include the `Bot/` directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Bot")))

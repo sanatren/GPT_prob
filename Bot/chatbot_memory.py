@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from supabase import create_client
 import streamlit as st
+from langchain_community.chat_models import ChatOpenAI
 
 # Constants
 MAX_HISTORY_LENGTH = 20  # Maximum number of messages to keep in memory
