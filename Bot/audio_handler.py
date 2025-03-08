@@ -6,9 +6,8 @@ import soundfile as sf
 import numpy as np
 from datetime import datetime
 import time
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
 import queue
-import threading
 import av
 
 from dotenv import load_dotenv
@@ -24,56 +23,50 @@ class AudioHandler:
             
         self.api_key = api_key
         self.client = OpenAI(api_key=self.api_key)
-        self.audio_queue = queue.Queue()
-        self.recording = False
+        self.audio_frames = []
         
     def record_audio(self, duration=5):
         """Record audio using WebRTC"""
         try:
             status = st.empty()
+            self.audio_frames = []  # Reset frames
             
-            def audio_callback(frame):
-                """Callback to receive audio frames"""
-                if self.recording:
-                    sound = frame.to_ndarray()
-                    self.audio_queue.put(sound)
+            def audio_frame_callback(frame):
+                """Process incoming audio frames"""
+                try:
+                    # Convert audio frame to numpy array
+                    audio_data = frame.to_ndarray()
+                    self.audio_frames.append(audio_data)
+                except Exception as e:
+                    st.error(f"Frame processing error: {e}")
                 return frame
             
-            # WebRTC Configuration
-            rtc_config = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
-            
             # Create WebRTC streamer
-            ctx = webrtc_streamer(
+            webrtc_ctx = webrtc_streamer(
                 key="audio_recorder",
                 mode=WebRtcMode.SENDONLY,
-                rtc_configuration=rtc_config,
-                media_stream_constraints={"video": False, "audio": True},
                 audio_receiver_size=1024,
-                async_processing=True,
-                callback=audio_callback
+                media_stream_constraints={
+                    "audio": True,
+                    "video": False
+                },
+                on_audio_frame=audio_frame_callback,
             )
             
-            if ctx.state.playing:
-                status.write("🎙️ Recording...")
-                self.recording = True
-                time.sleep(duration)
-                self.recording = False
+            if webrtc_ctx.state.playing:
+                status.write("🎙️ Recording... Speak now!")
+                time.sleep(duration)  # Record for specified duration
                 status.write("✅ Recording complete!")
                 
-                # Collect audio data
-                audio_data = []
-                while not self.audio_queue.empty():
-                    audio_data.append(self.audio_queue.get())
-                
-                if audio_data:
-                    # Concatenate audio chunks
-                    recording = np.concatenate(audio_data, axis=0)
-                    return recording, 48000  # WebRTC typically uses 48kHz
-                
+                if self.audio_frames:
+                    # Concatenate all audio frames
+                    audio_data = np.concatenate(self.audio_frames, axis=0)
+                    return audio_data, 48000  # WebRTC uses 48kHz sample rate
+                    
             return None, None
             
         except Exception as e:
-            st.error("Microphone error. Please check permissions.", icon="🎤")
+            st.error(f"Recording error: {str(e)}")
             return None, None
 
     def save_audio(self, recording, sample_rate):
@@ -90,14 +83,14 @@ class AudioHandler:
         """Transcribe audio using Whisper API"""
         try:
             with open(audio_path, "rb") as audio_file:
-                with st.spinner("Transcribing audio..."):
+                with st.spinner("Converting speech to text..."):
                     transcript = self.client.audio.transcriptions.create(
                         model="whisper-1",
                         file=audio_file
                     )
             return transcript.text
         except Exception as e:
-            st.error(f"Error transcribing audio: {str(e)}")
+            st.error(f"Transcription error: {str(e)}")
             return None
         finally:
             if os.path.exists(audio_path):
@@ -118,5 +111,5 @@ class AudioHandler:
             return transcript
             
         except Exception as e:
-            st.error("Voice input failed. Please try again.", icon="❌")
+            st.error(f"Voice input error: {str(e)}")
             return None 
