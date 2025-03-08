@@ -1,8 +1,8 @@
 # Audio dependencies
-sounddevice==0.4.6
-soundfile==0.12.1
-PyAudio==0.2.13
-portaudio19==0.2.0
+sounddevice
+soundfile
+PyAudio
+portaudio19
 
 # Existing dependencies
 langchain
