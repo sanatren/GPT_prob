@@ -1,8 +1,11 @@
 # Audio dependencies
-streamlit-webrtc==0.45.1
-av==10.0.0
-soundfile==0.12.1
-aiortc==1.5.0
+sounddevice
+soundfile
+PyAudio
+portaudio19
+aiortc>=1.10.1
+av>=10.0.0
+streamlit-webrtc>=0.47.9
 
 # Existing dependencies
 langchain
@@ -28,4 +31,4 @@ langserve
 supabase
 numpy>=1.24.3
 openai>=1.3.0
-aiortc==1.5.0
+av
