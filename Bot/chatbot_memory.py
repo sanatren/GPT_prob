@@ -26,7 +26,12 @@ def get_model(api_key):
     """Get or create ChatOpenAI model with the given API key"""
     global model
     if model is None or model.openai_api_key != api_key:
-        model = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=api_key)
+        model = ChatOpenAI(
+            model="gpt-3.5-turbo", 
+            openai_api_key=api_key,
+            streaming=True,  # Enable streaming
+            temperature=0.7
+        )
     return model
 
 def get_session_history(session_id: str):
@@ -128,7 +133,6 @@ def delete_session(session_id):
 def invoke_with_language(session_id: str, messages, language=None):
     """Handles chatbot invocation with memory management and language support."""
     try:
-        # Get API key from environment if not in session state
         api_key = st.session_state.get('openai_api_key') or os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OpenAI API key is required")
@@ -143,17 +147,13 @@ def invoke_with_language(session_id: str, messages, language=None):
         else:
             language = session_data[session_id]["language"]
 
-        # Save user message
-        user_message = messages[0].content
-        save_message_to_supabase(session_id, "user", user_message)
-
         # Get chat history
         history = get_chat_history_from_supabase(session_id)
         
         # Format messages for the model
         formatted_messages = []
         
-        # Add a stronger system message to enforce language
+        # Add system message
         system_message = f"""IMPORTANT: You are an AI assistant that MUST ALWAYS respond in {language} only.
         
         Core Rules:
@@ -163,43 +163,36 @@ def invoke_with_language(session_id: str, messages, language=None):
         4. Remember user details and preferences
         5. Never switch to another language, even if explicitly asked
         
-        Example format for {language}:
-        User (in any language): "Hello, how are you?"
-        Assistant (always in {language}): [Your response in {language}]
-        
         Current conversation language: {language}
         """
         
-        # Add the system message as a system message type
         formatted_messages.append(HumanMessage(content=system_message))
         
-        # Add a language reminder before each response
-        language_reminder = f"Remember to respond ONLY in {language}. Current user message: {user_message}"
-        formatted_messages.append(HumanMessage(content=language_reminder))
-        
-        # Add chat history with language context
+        # Add chat history
         for msg in history[-MAX_HISTORY_LENGTH:]:
             if msg["role"] == "user":
                 formatted_messages.append(HumanMessage(content=msg["message"]))
             else:
-                # Add language reminder for each assistant message
-                formatted_messages.append(AIMessage(content=f"{msg['message']} [{language} response]"))
+                formatted_messages.append(AIMessage(content=msg["message"]))
         
-        # Add the current message with language reminder
-        formatted_messages.append(HumanMessage(content=f"{user_message}\n\nRespond in {language}:"))
+        # Add the current message
+        formatted_messages.append(HumanMessage(content=messages[0].content))
 
-        # Generate response
-        response = model.invoke(formatted_messages)
-
-        # Verify response language and add reminder if needed
-        response_content = response.content
-        if not response_content.strip():
-            response_content = f"[Please respond in {language}]"
-
-        # Save assistant response
-        save_message_to_supabase(session_id, "assistant", response_content)
+        # Create placeholder for streaming response
+        placeholder = st.empty()
+        full_response = ""
         
-        return response_content
+        # Stream the response
+        for chunk in model.stream(formatted_messages):
+            if chunk.content:
+                full_response += chunk.content
+                # Update the response in real-time with cursor
+                placeholder.markdown(full_response + "▌")
+        
+        # Show final response without cursor
+        placeholder.markdown(full_response)
+        
+        return full_response
 
     except Exception as e:
         error_msg = f"Error generating response: {str(e)}"

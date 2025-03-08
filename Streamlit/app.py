@@ -11,7 +11,13 @@ from langchain.chat_models import ChatOpenAI
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Bot")))
 
 # Import chatbot functions
-from chatbot_memory import invoke_with_language, get_session_history, set_session_language
+from audio_handler import AudioHandler
+from chatbot_memory import (
+    invoke_with_language, 
+    get_session_history, 
+    set_session_language,
+    save_message_to_supabase  # Add this import
+)
 from supabase import create_client  # Import Supabase client
 
 # Load environment variables
@@ -198,9 +204,24 @@ api_key_input = st.sidebar.text_input(
 )
 
 if api_key_input:
-    st.session_state.openai_api_key = api_key_input
-    # Reinitialize the model with the new API key
-    model = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=api_key_input)
+    if not api_key_input.startswith('sk-'):
+        st.sidebar.error("Invalid API key format. Key should start with 'sk-'")
+        st.stop()
+        
+    try:
+        # Store API key in session state
+        st.session_state.openai_api_key = api_key_input
+        
+        # Initialize audio handler with the API key
+        audio_handler = AudioHandler(api_key_input)
+        
+        # Initialize the model with the new API key
+        model = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=api_key_input)
+        
+        st.sidebar.success("API key successfully validated!")
+    except Exception as e:
+        st.sidebar.error(f"Error initializing with API key: {str(e)}")
+        st.stop()
 else:
     st.sidebar.error("Please enter your OpenAI API key to start chatting!")
     st.stop()
@@ -355,56 +376,113 @@ if not st.session_state.openai_api_key:
 else:
     st.subheader(st.session_state.current_session_name)
     
-    # Update the session info display
-    session_info = supabase.table("sessions").select("*").eq("session_id", st.session_state.current_session).execute()
-    if session_info.data:
-        session = session_info.data[0]
-        st.sidebar.info(f"""
-        Session Info:
-        - Name: {session['name']}
-        - Created: {session['created_at'].split('.')[0].replace('T', ' ')}
-        - Last Active: {session['last_accessed'].split('.')[0].replace('T', ' ')}
-        - Language: {session['language']}
-        """)
-
-    # Get and display chat history
+    # Get chat history
     chat_history = get_chat_history_from_supabase(st.session_state.current_session)
-
-    # Display messages
-    for msg in chat_history:
-        if msg["role"] == "assistant":
-            with st.chat_message("assistant"):
+    
+    # Display chat history
+    chat_container = st.container()
+    with chat_container:
+        for msg in chat_history:
+            with st.chat_message(msg["role"]):
                 st.write(msg["message"])
-        else:
-            with st.chat_message("user"):
-                st.write(msg["message"])
-
-    # User input
-    if prompt := st.chat_input("What's on your mind?"):
-        if not st.session_state.openai_api_key:
-            st.error("Please enter your OpenAI API key in the sidebar!")
-        else:
-            with st.chat_message("user"):
-                st.write(prompt)
+    
+    # Input area container
+    input_container = st.container()
+    with input_container:
+        # Create two columns for text input and voice button
+        col1, col2 = st.columns([6, 1])
+        
+        # Text input in the first (wider) column
+        with col1:
+            prompt = st.chat_input("Message PolyBot...")
+        
+        # Voice button in the second (narrower) column
+        with col2:
+            voice_button = st.button("🎤", key="voice_input", help="Click to record (5 seconds)")
+    
+    # Handle text input
+    if prompt:
+        # Save user message first
+        save_message_to_supabase(
+            st.session_state.current_session,
+            "user",
+            prompt
+        )
+        
+        # Get response before displaying anything
+        response = invoke_with_language(
+            session_id=st.session_state.current_session,
+            messages=[HumanMessage(content=prompt)],
+            language=st.session_state.current_language
+        )
+        
+        if response:
+            # Save assistant response
+            save_message_to_supabase(
+                st.session_state.current_session,
+                "assistant",
+                response
+            )
             
-            with st.spinner("Thinking..."):
-                try:
-                    response = invoke_with_language(
-                        session_id=st.session_state.current_session,
-                        messages=[HumanMessage(content=prompt)],
-                        language=st.session_state.current_language
-                    )
-                    
-                    with st.chat_message("assistant"):
-                        st.write(response)
-                    
-                    save_session_to_supabase(
-                        st.session_state.current_session,
-                        st.session_state.current_session_name,
-                        st.session_state.current_language
-                    )
-                    
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
-                    import traceback
-                    st.error(traceback.format_exc())
+            # Update session metadata
+            save_session_to_supabase(
+                st.session_state.current_session,
+                st.session_state.current_session_name,
+                st.session_state.current_language
+            )
+            
+            # Rerun to refresh the chat
+            st.rerun()
+
+    # Handle voice input similarly
+    if voice_button:
+        transcript = audio_handler.process_voice_input(duration=5)
+        if transcript:
+            # Save user message first
+            save_message_to_supabase(
+                st.session_state.current_session,
+                "user",
+                transcript
+            )
+            
+            # Get response before displaying anything
+            response = invoke_with_language(
+                session_id=st.session_state.current_session,
+                messages=[HumanMessage(content=transcript)],
+                language=st.session_state.current_language
+            )
+            
+            if response:
+                # Save assistant response
+                save_message_to_supabase(
+                    st.session_state.current_session,
+                    "assistant",
+                    response
+                )
+                
+                # Update session metadata
+                save_session_to_supabase(
+                    st.session_state.current_session,
+                    st.session_state.current_session_name,
+                    st.session_state.current_language
+                )
+                
+                # Rerun to refresh the chat
+                st.rerun()
+
+def save_message_to_supabase(session_id, role, message):
+    """Stores chat messages in Supabase with enhanced error handling."""
+    try:
+        # First ensure session exists to satisfy foreign key constraint
+        save_session_to_supabase(session_id, "Untitled Chat")
+        
+        data = {
+            "session_id": session_id,
+            "role": role,
+            "message": message
+        }
+        response = supabase.table("history").insert(data).execute()
+        return response
+    except Exception as e:
+        st.error(f"Error saving message: {str(e)}")
+        return None
