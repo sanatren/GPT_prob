@@ -2,11 +2,14 @@ import os
 import tempfile
 import streamlit as st
 from openai import OpenAI
-import sounddevice as sd
 import soundfile as sf
 import numpy as np
 from datetime import datetime
 import time
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+import queue
+import threading
+import av
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -19,56 +22,55 @@ class AudioHandler:
         if not api_key or not api_key.startswith('sk-'):
             raise ValueError("Invalid OpenAI API key format. Key should start with 'sk-'")
             
-        try:
-            # Store API key and initialize client
-            self.api_key = api_key
-            self.client = OpenAI(api_key=self.api_key)
-            
-            # Audio settings
-            self.sample_rate = 44100
-            self.channels = 1
-        except Exception as e:
-            st.error(f"Error initializing OpenAI client: {e}")
-            raise
-
+        self.api_key = api_key
+        self.client = OpenAI(api_key=self.api_key)
+        self.audio_queue = queue.Queue()
+        self.recording = False
+        
     def record_audio(self, duration=5):
-        """Record audio for specified duration"""
+        """Record audio using WebRTC"""
         try:
-            # Simple status message
             status = st.empty()
-            progress = st.progress(0)
             
-            # Quick countdown
-            for i in range(3, 0, -1):
-                status.write(f"Starting in {i}...")
-                time.sleep(0.5)
+            def audio_callback(frame):
+                """Callback to receive audio frames"""
+                if self.recording:
+                    sound = frame.to_ndarray()
+                    self.audio_queue.put(sound)
+                return frame
             
-            # Record
-            status.write("🎙️ Recording...")
-            recording = sd.rec(
-                int(duration * self.sample_rate),
-                samplerate=self.sample_rate,
-                channels=self.channels,
-                dtype=np.float32
+            # WebRTC Configuration
+            rtc_config = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
+            
+            # Create WebRTC streamer
+            ctx = webrtc_streamer(
+                key="audio_recorder",
+                mode=WebRtcMode.SENDONLY,
+                rtc_configuration=rtc_config,
+                media_stream_constraints={"video": False, "audio": True},
+                audio_receiver_size=1024,
+                async_processing=True,
+                callback=audio_callback
             )
             
-            # Show progress
-            for i in range(duration):
-                progress.progress((i + 1) / duration)
-                time.sleep(1)
-            
-            sd.wait()
-            
-            # Cleanup UI elements
-            status.empty()
-            progress.empty()
-            
-            # Validate recording
-            if np.abs(recording).max() < 0.01:
-                st.warning("No audio detected. Please speak louder.", icon="🔇")
-                return None, None
+            if ctx.state.playing:
+                status.write("🎙️ Recording...")
+                self.recording = True
+                time.sleep(duration)
+                self.recording = False
+                status.write("✅ Recording complete!")
                 
-            return recording, self.sample_rate
+                # Collect audio data
+                audio_data = []
+                while not self.audio_queue.empty():
+                    audio_data.append(self.audio_queue.get())
+                
+                if audio_data:
+                    # Concatenate audio chunks
+                    recording = np.concatenate(audio_data, axis=0)
+                    return recording, 48000  # WebRTC typically uses 48kHz
+                
+            return None, None
             
         except Exception as e:
             st.error("Microphone error. Please check permissions.", icon="🎤")
@@ -77,7 +79,6 @@ class AudioHandler:
     def save_audio(self, recording, sample_rate):
         """Save recording to temporary file"""
         try:
-            # Create temp file with wav extension
             with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_audio:
                 sf.write(temp_audio.name, recording, sample_rate)
                 return temp_audio.name
@@ -90,7 +91,6 @@ class AudioHandler:
         try:
             with open(audio_path, "rb") as audio_file:
                 with st.spinner("Transcribing audio..."):
-                    # Create transcription without explicit api_key parameter
                     transcript = self.client.audio.transcriptions.create(
                         model="whisper-1",
                         file=audio_file
@@ -100,24 +100,20 @@ class AudioHandler:
             st.error(f"Error transcribing audio: {str(e)}")
             return None
         finally:
-            # Clean up temp file
             if os.path.exists(audio_path):
                 os.remove(audio_path)
 
     def process_voice_input(self, duration=5):
         """Process voice input with minimal UI disruption"""
         try:
-            # Record
             recording, sample_rate = self.record_audio(duration)
             if recording is None:
                 return None
                 
-            # Save and transcribe
             audio_path = self.save_audio(recording, sample_rate)
             if audio_path is None:
                 return None
                 
-            # Transcribe
             transcript = self.transcribe_audio(audio_path)
             return transcript
             

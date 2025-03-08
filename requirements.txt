@@ -2,7 +2,7 @@
 sounddevice
 soundfile
 PyAudio
-
+streamlit-webrtc
 # Existing dependencies
 langchain
 python-dotenv
