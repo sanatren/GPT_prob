@@ -1,5 +1,5 @@
 libasound2-dev
-portaudio19-dev
+
 libopus-dev
 ffmpeg
 libavformat-dev
@@ -9,3 +9,6 @@ libavutil-dev
 libavfilter-dev
 libswscale-dev
 libswresample-dev
+portaudio
+libasound2-dev
+
