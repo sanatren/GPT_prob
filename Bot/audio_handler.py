@@ -31,7 +31,7 @@ class AudioHandler:
             status = st.empty()
             self.audio_frames = []  # Reset frames
             
-            def audio_frame_callback(frame):
+            def video_frame_callback(frame):
                 """Process incoming audio frames"""
                 try:
                     # Convert audio frame to numpy array
@@ -45,12 +45,13 @@ class AudioHandler:
             webrtc_ctx = webrtc_streamer(
                 key="audio_recorder",
                 mode=WebRtcMode.SENDONLY,
-                audio_receiver_size=1024,
+                rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
                 media_stream_constraints={
                     "audio": True,
                     "video": False
                 },
-                on_audio_frame=audio_frame_callback,
+                video_frame_callback=video_frame_callback,
+                async_processing=True,
             )
             
             if webrtc_ctx.state.playing:
