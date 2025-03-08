@@ -1,0 +1,22 @@
+langchain
+python-dotenv
+langchain_community
+pypdf
+beautifulsoup4
+arxiv
+pymupdf
+wikipedia
+langchain-text-splitters
+langchain-openai
+chromadb
+ langchain-community
+ sentence_transformers
+ langchain_huggingface
+ faiss-cpu
+ langchain-chroma
+langchain-groq
+langchain_core
+fastapi
+uvicorn
+langserve
+supabase
