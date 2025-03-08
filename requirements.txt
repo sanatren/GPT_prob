@@ -2,7 +2,6 @@
 sounddevice
 soundfile
 PyAudio
-portaudio19
 
 # Existing dependencies
 langchain
