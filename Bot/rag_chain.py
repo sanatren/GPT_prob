@@ -19,7 +19,7 @@ class RAGChain:
         self.llm = ChatOpenAI(
             model="gpt-3.5-turbo",
             openai_api_key=api_key,
-            temperature=0.2
+            temperature=0.5
         )
         
         # Create the prompt template with chat history and language support
