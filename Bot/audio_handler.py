@@ -45,7 +45,7 @@ class AudioHandler:
                 st.write("Click the microphone button below to start recording. Click again to stop.")
                 
                 # Add mic recorder component
-                audio_bytes = mic_recorder(
+                audio_data = mic_recorder(
                     key="voice_recorder",
                     start_prompt="Click to start recording",
                     stop_prompt="Click to stop recording",
@@ -53,20 +53,25 @@ class AudioHandler:
                     use_container_width=False
                 )
                 
-                if audio_bytes:
-                    # Display audio player for the recorded audio
-                    st.audio(audio_bytes)
-                    
-                    # Save the recorded audio to a temporary file
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-                        tmp_file.write(audio_bytes)
-                        audio_path = tmp_file.name
-                    
-                    # Show success message
-                    st.success("Recording captured! Processing...")
-                    
-                    # Return the path to the saved file
-                    return audio_path, None
+                if audio_data:
+                    # The mic_recorder returns a dictionary with audio data
+                    # Extract the audio bytes from the dictionary
+                    if isinstance(audio_data, dict) and 'bytes' in audio_data:
+                        audio_bytes = audio_data['bytes']
+                        
+                        # Display audio player for the recorded audio
+                        st.audio(audio_bytes)
+                        
+                        # Save the recorded audio to a temporary file
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
+                            tmp_file.write(audio_bytes)
+                            audio_path = tmp_file.name
+                        
+                        # Show success message
+                        st.success("Recording captured! Processing...")
+                        
+                        # Return the path to the saved file
+                        return audio_path, None
             
             with tab2:
                 st.write("Upload an audio file (WAV, MP3, M4A)")
