@@ -17,7 +17,7 @@ from chatbot_memory import (
     invoke_with_language, 
     get_session_history, 
     set_session_language,
-    save_message_to_supabase  # Add this import
+    save_message_to_supabase
 )
 from supabase import create_client  # Import Supabase client
 
@@ -74,6 +74,24 @@ div.stButton > button:hover {
 }
 </style>
 """, unsafe_allow_html=True)
+
+# Function to save message to Supabase
+def save_message_to_supabase(session_id, role, message):
+    """Stores chat messages in Supabase with enhanced error handling."""
+    try:
+        # First ensure session exists to satisfy foreign key constraint
+        save_session_to_supabase(session_id, "Untitled Chat")
+        
+        data = {
+            "session_id": session_id,
+            "role": role,
+            "message": message
+        }
+        response = supabase.table("history").insert(data).execute()
+        return response
+    except Exception as e:
+        st.error(f"Error saving message: {str(e)}")
+        return None
 
 # Move the display_chat_messages function to the top with other functions
 def display_chat_messages(chat_history):
@@ -416,87 +434,90 @@ else:
             
         with voice_tab:
             # This will show the audio recorder directly without needing a button click
-            st.write("### Voice Input")
-            recording_result = audio_handler.record_audio(duration=5)
-            
-            # Check if we got a recording
-            if recording_result and recording_result[0] is not None:
-                audio_path, _ = recording_result
+            try:
+                recording_result = audio_handler.record_audio(duration=5)
                 
-                # Process the recording with a timeout
-                with st.spinner("Transcribing audio..."):
-                    try:
-                        # Set a timeout for transcription (30 seconds)
-                        import threading
-                        import time
-                        
-                        result = [None]
-                        def transcribe_with_timeout():
-                            result[0] = audio_handler.transcribe_audio(audio_path)
-                        
-                        thread = threading.Thread(target=transcribe_with_timeout)
-                        thread.start()
-                        
-                        # Wait for up to 30 seconds
-                        timeout = 30
-                        start_time = time.time()
-                        while thread.is_alive() and time.time() - start_time < timeout:
-                            time.sleep(0.1)
-                        
-                        if thread.is_alive():
-                            st.error(f"Transcription timed out after {timeout} seconds. Please try again.")
-                            transcript = None
-                        else:
-                            transcript = result[0]
-                    except Exception as e:
-                        st.error(f"Error during transcription: {str(e)}")
-                        transcript = None
-                
-                if transcript:
-                    st.success(f"Transcribed: {transcript}")
+                # Check if we got a recording
+                if recording_result and recording_result[0] is not None:
+                    audio_path, _ = recording_result
                     
-                    # Add a button to send the transcript
-                    if st.button("Send this message"):
-                        # Display the transcript to the user
-                        with st.chat_message("user"):
-                            st.write(transcript)
+                    # Process the recording with a timeout
+                    with st.spinner("Transcribing audio..."):
+                        try:
+                            # Set a timeout for transcription (30 seconds)
+                            import threading
+                            import time
                             
-                        # Save user message
-                        save_message_to_supabase(
-                            st.session_state.current_session,
-                            "user",
-                            transcript
-                        )
+                            result = [None]
+                            def transcribe_with_timeout():
+                                result[0] = audio_handler.transcribe_audio(audio_path)
+                            
+                            thread = threading.Thread(target=transcribe_with_timeout)
+                            thread.start()
+                            
+                            # Wait for up to 30 seconds
+                            timeout = 30
+                            start_time = time.time()
+                            while thread.is_alive() and time.time() - start_time < timeout:
+                                time.sleep(0.1)
+                            
+                            if thread.is_alive():
+                                st.error(f"Transcription timed out after {timeout} seconds. Please try again.")
+                                transcript = None
+                            else:
+                                transcript = result[0]
+                        except Exception as e:
+                            st.error(f"Error during transcription: {str(e)}")
+                            transcript = None
+                    
+                    if transcript:
+                        st.success(f"Transcribed: {transcript}")
                         
-                        # Get response
-                        with st.spinner("Generating response..."):
-                            response = invoke_with_language(
-                                session_id=st.session_state.current_session,
-                                messages=[HumanMessage(content=transcript)],
-                                language=st.session_state.current_language
-                            )
-                        
-                        if response:
-                            # Display the bot's response
-                            with st.chat_message("assistant"):
-                                st.write(response)
+                        # Add a button to send the transcript
+                        if st.button("Send this message"):
+                            # Display the transcript to the user
+                            with st.chat_message("user"):
+                                st.write(transcript)
                                 
-                            # Save assistant response
+                            # Save user message
                             save_message_to_supabase(
                                 st.session_state.current_session,
-                                "assistant",
-                                response
+                                "user",
+                                transcript
                             )
                             
-                            # Update session metadata
-                            save_session_to_supabase(
-                                st.session_state.current_session,
-                                st.session_state.current_session_name,
-                                st.session_state.current_language
-                            )
+                            # Get response
+                            with st.spinner("Generating response..."):
+                                response = invoke_with_language(
+                                    session_id=st.session_state.current_session,
+                                    messages=[HumanMessage(content=transcript)],
+                                    language=st.session_state.current_language
+                                )
                             
-                            # Refresh the page to show the updated chat
-                            st.rerun()
+                            if response:
+                                # Display the bot's response
+                                with st.chat_message("assistant"):
+                                    st.write(response)
+                                    
+                                # Save assistant response
+                                save_message_to_supabase(
+                                    st.session_state.current_session,
+                                    "assistant",
+                                    response
+                                )
+                                
+                                # Update session metadata
+                                save_session_to_supabase(
+                                    st.session_state.current_session,
+                                    st.session_state.current_session_name,
+                                    st.session_state.current_language
+                                )
+                                
+                                # Refresh the page to show the updated chat
+                                st.rerun()
+            except Exception as e:
+                st.error(f"Error with audio recording: {str(e)}")
+                st.info("Please make sure you have the necessary permissions for microphone access.")
 
 # After the chat history display, check if there's a pending user message
 if "pending_user_message" in st.session_state:
@@ -528,20 +549,3 @@ if "pending_user_message" in st.session_state:
         
         # Rerun to refresh the chat
         st.rerun()
-
-def save_message_to_supabase(session_id, role, message):
-    """Stores chat messages in Supabase with enhanced error handling."""
-    try:
-        # First ensure session exists to satisfy foreign key constraint
-        save_session_to_supabase(session_id, "Untitled Chat")
-        
-        data = {
-            "session_id": session_id,
-            "role": role,
-            "message": message
-        }
-        response = supabase.table("history").insert(data).execute()
-        return response
-    except Exception as e:
-        st.error(f"Error saving message: {str(e)}")
-        return None

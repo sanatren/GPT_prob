@@ -28,5 +28,3 @@ transformers
 uvicorn
 wikipedia
 
-streamlit-mic-recorder
-

@@ -59,13 +59,17 @@ class AudioHandler:
                     if isinstance(audio_data, dict) and 'bytes' in audio_data:
                         audio_bytes = audio_data['bytes']
                         
-                        # Display audio player for the recorded audio
-                        st.audio(audio_bytes)
-                        
                         # Save the recorded audio to a temporary file
                         with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
                             tmp_file.write(audio_bytes)
                             audio_path = tmp_file.name
+                        
+                        # Display audio player for the recorded audio - using file path to avoid binary data issues
+                        try:
+                            with open(audio_path, 'rb') as audio_file:
+                                st.audio(audio_file.read(), format="audio/wav")
+                        except Exception as e:
+                            st.warning(f"Could not display audio player: {e}. Processing will continue.")
                         
                         # Show success message
                         st.success("Recording captured! Processing...")
@@ -82,12 +86,17 @@ class AudioHandler:
                                                 key="audio_upload")
                 
                 if uploaded_file is not None:
-                    # Display audio player for the uploaded file
-                    st.audio(uploaded_file, format=f"audio/{uploaded_file.name.split('.')[-1]}")
+                    # Display audio player for the uploaded file using file bytes
+                    file_bytes = uploaded_file.getvalue()
+                    file_extension = uploaded_file.name.split('.')[-1].lower()
+                    try:
+                        st.audio(file_bytes, format=f"audio/{file_extension}")
+                    except Exception as e:
+                        st.warning(f"Could not display audio player: {e}. Processing will continue.")
                     
                     # Save the uploaded file to a temporary location
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{uploaded_file.name.split(".")[-1]}') as tmp_file:
-                        tmp_file.write(uploaded_file.getvalue())
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_extension}') as tmp_file:
+                        tmp_file.write(file_bytes)
                         audio_path = tmp_file.name
                     
                     # Show success message
@@ -105,12 +114,17 @@ class AudioHandler:
                                             type=["wav", "mp3", "m4a"])
             
             if uploaded_file is not None:
-                # Display audio player for the uploaded file
-                st.audio(uploaded_file, format=f"audio/{uploaded_file.name.split('.')[-1]}")
+                # Display audio player for the uploaded file using file bytes
+                file_bytes = uploaded_file.getvalue()
+                file_extension = uploaded_file.name.split('.')[-1].lower()
+                try:
+                    st.audio(file_bytes, format=f"audio/{file_extension}")
+                except Exception as e:
+                    st.warning(f"Could not display audio player: {e}. Processing will continue.")
                 
                 # Save the uploaded file to a temporary location
-                with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{uploaded_file.name.split(".")[-1]}') as tmp_file:
-                    tmp_file.write(uploaded_file.getvalue())
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_extension}') as tmp_file:
+                    tmp_file.write(file_bytes)
                     audio_path = tmp_file.name
                 
                 # Show success message
@@ -163,7 +177,10 @@ class AudioHandler:
         finally:
             # Clean up temp file
             if audio_path and os.path.exists(audio_path):
-                os.remove(audio_path)
+                try:
+                    os.remove(audio_path)
+                except Exception as e:
+                    st.warning(f"Could not remove temporary file: {e}")
 
     def process_voice_input(self, duration=5):
         """Process voice input with minimal UI disruption"""
@@ -186,4 +203,4 @@ class AudioHandler:
             
         except Exception as e:
             st.error(f"Voice input error: {str(e)}")
-            return None 
+            return None
