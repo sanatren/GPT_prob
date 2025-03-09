@@ -8,9 +8,10 @@ from datetime import datetime, timedelta
 from langchain.chat_models import ChatOpenAI
 from langchain_community.chat_models import ChatOpenAI
 
+
 # Adjust Python path to include the `Bot/` directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Bot")))
-
+from rag_chain import RAGChain
 # Import chatbot functions
 from audio_handler import AudioHandler
 from chatbot_memory import (
@@ -237,6 +238,9 @@ if api_key_input:
         # Initialize the model with the new API key
         model = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=api_key_input)
         
+        # Initialize the RAG chain after initializing the audio handler
+        rag_chain = RAGChain(api_key_input)
+        
         st.sidebar.success("API key successfully validated!")
     except Exception as e:
         st.sidebar.error(f"Error initializing with API key: {str(e)}")
@@ -387,6 +391,29 @@ if language and language != st.session_state.current_language:
     )
     st.sidebar.success(f"Now responding in {language}")
 
+# Add a new tab in the sidebar for document upload
+with st.sidebar.expander("📄 Document Upload", expanded=False):
+    st.write("Upload documents to chat with them")
+    
+    uploaded_file = st.file_uploader(
+        "Upload a document (PDF, Word, Excel, PowerPoint, Text)",
+        type=["pdf", "docx", "xlsx", "xls", "pptx", "txt"],
+        key="document_upload"
+    )
+    
+    if uploaded_file:
+        with st.spinner(f"Processing {uploaded_file.name}..."):
+            if rag_chain.process_file(uploaded_file, st.session_state.current_session):
+                st.success(f"Successfully processed {uploaded_file.name}")
+            else:
+                st.error(f"Failed to process {uploaded_file.name}")
+    
+    if st.button("Clear All Documents"):
+        if rag_chain.clear_documents(st.session_state.current_session):
+            st.success("All documents cleared")
+        else:
+            st.info("No documents to clear")
+
 # Main Chat Interface
 st.title("🤖 PolyBot")
 
@@ -405,6 +432,13 @@ else:
             with st.chat_message(msg["role"]):
                 st.write(msg["message"])
     
+    # Check if we should use RAG (if documents have been uploaded)
+    use_rag = st.session_state.current_session in rag_chain.document_processor.vectorstores
+    
+    # Add this after the chat history display
+    if use_rag:
+        st.info("📄 Document mode active: I'll use your uploaded documents to answer questions, but I can still chat about other topics too.")
+    
     # Input area container
     input_container = st.container()
     with input_container:
@@ -415,10 +449,8 @@ else:
             # Text input
             prompt = st.chat_input("Message PolyBot...")
             
-            # Handle text input
             if prompt:
                 # We'll use session state to store the message and response temporarily
-                # This will help us control the UI flow better
                 if "pending_user_message" not in st.session_state:
                     st.session_state.pending_user_message = prompt
                     
@@ -488,11 +520,33 @@ else:
                             
                             # Get response
                             with st.spinner("Generating response..."):
-                                response = invoke_with_language(
-                                    session_id=st.session_state.current_session,
-                                    messages=[HumanMessage(content=transcript)],
-                                    language=st.session_state.current_language
-                                )
+                                # Get chat history for context
+                                chat_history = get_chat_history_from_supabase(st.session_state.current_session)
+                                
+                                if use_rag:
+                                    # Use RAG to answer the question with chat history and language
+                                    rag_response = rag_chain.answer_question(
+                                        transcript,
+                                        st.session_state.current_session,
+                                        chat_history,
+                                        st.session_state.current_language
+                                    )
+                                    response = rag_response["answer"]
+                                    
+                                    # Optionally display sources
+                                    with st.expander("View Sources"):
+                                        for i, source in enumerate(rag_response["sources"]):
+                                            st.markdown(f"**Source {i+1}:** {source['metadata']['source']}")
+                                            st.markdown(f"**Relevance Score:** {source['score']:.2f}")
+                                            st.markdown(f"**Content:**\n{source['content']}")
+                                            st.markdown("---")
+                                else:
+                                    # Use regular chat completion
+                                    response = invoke_with_language(
+                                        session_id=st.session_state.current_session,
+                                        messages=[HumanMessage(content=transcript)],
+                                        language=st.session_state.current_language
+                                    )
                             
                             if response:
                                 # Display the bot's response
@@ -519,15 +573,37 @@ else:
                 st.error(f"Error with audio recording: {str(e)}")
                 st.info("Please make sure you have the necessary permissions for microphone access.")
 
-# After the chat history display, check if there's a pending user message
+# Modify the section where you handle the pending user message
 if "pending_user_message" in st.session_state:
+    # Get chat history for context
+    chat_history = get_chat_history_from_supabase(st.session_state.current_session)
+    
     # Get response
     with st.spinner("Generating response..."):
-        response = invoke_with_language(
-            session_id=st.session_state.current_session,
-            messages=[HumanMessage(content=st.session_state.pending_user_message)],
-            language=st.session_state.current_language
-        )
+        if use_rag:
+            # Use RAG to answer the question with chat history and language
+            rag_response = rag_chain.answer_question(
+                st.session_state.pending_user_message,
+                st.session_state.current_session,
+                chat_history,
+                st.session_state.current_language
+            )
+            response = rag_response["answer"]
+            
+            # Optionally display sources
+            with st.expander("View Sources"):
+                for i, source in enumerate(rag_response["sources"]):
+                    st.markdown(f"**Source {i+1}:** {source['metadata']['source']}")
+                    st.markdown(f"**Relevance Score:** {source['score']:.2f}")
+                    st.markdown(f"**Content:**\n{source['content']}")
+                    st.markdown("---")
+        else:
+            # Use regular chat completion
+            response = invoke_with_language(
+                session_id=st.session_state.current_session,
+                messages=[HumanMessage(content=st.session_state.pending_user_message)],
+                language=st.session_state.current_language
+            )
     
     if response:
         # Save assistant response
