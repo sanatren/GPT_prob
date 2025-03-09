@@ -20,7 +20,10 @@ PyAudio
 sentence_transformers
 sounddevice
 soundfile
+streamlit-audio-recorder
 streamlit-webrtc>=0.47.9
 supabase
+torch
+transformers
 uvicorn
 wikipedia

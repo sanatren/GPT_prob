@@ -390,86 +390,144 @@ else:
     # Input area container
     input_container = st.container()
     with input_container:
-        # Create two columns for text input and voice button
-        col1, col2 = st.columns([6, 1])
+        # Create tabs for text and voice input
+        input_tab, voice_tab = st.tabs(["Text Input", "Voice Input"])
         
-        # Text input in the first (wider) column
-        with col1:
+        with input_tab:
+            # Text input
             prompt = st.chat_input("Message PolyBot...")
-        
-        # Voice button in the second (narrower) column
-        with col2:
-            voice_button = st.button("🎤", key="voice_input", help="Click to record (5 seconds)")
-    
-    # Handle text input
-    if prompt:
-        # Save user message first
-        save_message_to_supabase(
-            st.session_state.current_session,
-            "user",
-            prompt
-        )
-        
-        # Get response before displaying anything
+            
+            # Handle text input
+            if prompt:
+                # We'll use session state to store the message and response temporarily
+                # This will help us control the UI flow better
+                if "pending_user_message" not in st.session_state:
+                    st.session_state.pending_user_message = prompt
+                    
+                    # Save user message
+                    save_message_to_supabase(
+                        st.session_state.current_session,
+                        "user",
+                        prompt
+                    )
+                    
+                    # Force a rerun to update the UI with the user message first
+                    st.rerun()
+            
+        with voice_tab:
+            # This will show the audio recorder directly without needing a button click
+            st.write("### Voice Input")
+            recording_result = audio_handler.record_audio(duration=5)
+            
+            # Check if we got a recording
+            if recording_result and recording_result[0] is not None:
+                audio_path, _ = recording_result
+                
+                # Process the recording with a timeout
+                with st.spinner("Transcribing audio..."):
+                    try:
+                        # Set a timeout for transcription (30 seconds)
+                        import threading
+                        import time
+                        
+                        result = [None]
+                        def transcribe_with_timeout():
+                            result[0] = audio_handler.transcribe_audio(audio_path)
+                        
+                        thread = threading.Thread(target=transcribe_with_timeout)
+                        thread.start()
+                        
+                        # Wait for up to 30 seconds
+                        timeout = 30
+                        start_time = time.time()
+                        while thread.is_alive() and time.time() - start_time < timeout:
+                            time.sleep(0.1)
+                        
+                        if thread.is_alive():
+                            st.error(f"Transcription timed out after {timeout} seconds. Please try again.")
+                            transcript = None
+                        else:
+                            transcript = result[0]
+                    except Exception as e:
+                        st.error(f"Error during transcription: {str(e)}")
+                        transcript = None
+                
+                if transcript:
+                    st.success(f"Transcribed: {transcript}")
+                    
+                    # Add a button to send the transcript
+                    if st.button("Send this message"):
+                        # Display the transcript to the user
+                        with st.chat_message("user"):
+                            st.write(transcript)
+                            
+                        # Save user message
+                        save_message_to_supabase(
+                            st.session_state.current_session,
+                            "user",
+                            transcript
+                        )
+                        
+                        # Get response
+                        with st.spinner("Generating response..."):
+                            response = invoke_with_language(
+                                session_id=st.session_state.current_session,
+                                messages=[HumanMessage(content=transcript)],
+                                language=st.session_state.current_language
+                            )
+                        
+                        if response:
+                            # Display the bot's response
+                            with st.chat_message("assistant"):
+                                st.write(response)
+                                
+                            # Save assistant response
+                            save_message_to_supabase(
+                                st.session_state.current_session,
+                                "assistant",
+                                response
+                            )
+                            
+                            # Update session metadata
+                            save_session_to_supabase(
+                                st.session_state.current_session,
+                                st.session_state.current_session_name,
+                                st.session_state.current_language
+                            )
+                            
+                            # Refresh the page to show the updated chat
+                            st.rerun()
+
+# After the chat history display, check if there's a pending user message
+if "pending_user_message" in st.session_state:
+    # Get response
+    with st.spinner("Generating response..."):
         response = invoke_with_language(
             session_id=st.session_state.current_session,
-            messages=[HumanMessage(content=prompt)],
+            messages=[HumanMessage(content=st.session_state.pending_user_message)],
             language=st.session_state.current_language
         )
+    
+    if response:
+        # Save assistant response
+        save_message_to_supabase(
+            st.session_state.current_session,
+            "assistant",
+            response
+        )
         
-        if response:
-            # Save assistant response
-            save_message_to_supabase(
-                st.session_state.current_session,
-                "assistant",
-                response
-            )
-            
-            # Update session metadata
-            save_session_to_supabase(
-                st.session_state.current_session,
-                st.session_state.current_session_name,
-                st.session_state.current_language
-            )
-            
-            # Rerun to refresh the chat
-            st.rerun()
-
-    # Handle voice input similarly
-    if voice_button:
-        transcript = audio_handler.process_voice_input(duration=5)
-        if transcript:
-            # Save user message first
-            save_message_to_supabase(
-                st.session_state.current_session,
-                "user",
-                transcript
-            )
-            
-            # Get response before displaying anything
-            response = invoke_with_language(
-                session_id=st.session_state.current_session,
-                messages=[HumanMessage(content=transcript)],
-                language=st.session_state.current_language
-            )
-            
-            if response:
-                # Save assistant response
-                save_message_to_supabase(
-                    st.session_state.current_session,
-                    "assistant",
-                    response
-                )
-                
-                # Update session metadata
-                save_session_to_supabase(
-                    st.session_state.current_session,
-                    st.session_state.current_session_name,
-                    st.session_state.current_language
-                )
-                
-                # Rerun to refresh the chat
-                st.rerun()
+        # Update session metadata
+        save_session_to_supabase(
+            st.session_state.current_session,
+            st.session_state.current_session_name,
+            st.session_state.current_language
+        )
+        
+        # Clear the pending message
+        del st.session_state.pending_user_message
+        
+        # Rerun to refresh the chat
+        st.rerun()
 
 def save_message_to_supabase(session_id, role, message):
     """Stores chat messages in Supabase with enhanced error handling."""

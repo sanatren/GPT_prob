@@ -131,54 +131,37 @@ def delete_session(session_id):
         print(f"Error deleting session: {e}")
         return False
 
-def invoke_with_language(session_id: str, messages, language=None):
-    """Handles chatbot invocation with memory management and language support."""
+def invoke_with_language(session_id, messages, language="English"):
+    """Invoke the model with instructions to respond in the specified language"""
+    api_key = st.session_state.get("openai_api_key", openai_api_key)
+    if not api_key:
+        st.error("OpenAI API key is not set")
+        return None
+    
+    # Get chat history from Supabase instead of in-memory
+    history = get_chat_history_from_supabase(session_id)
+    
+    # Create a system message instructing the model to respond in the specified language
+    system_message = f"You are a helpful assistant. Please respond in {language}. If you don't know how to speak {language}, do your best to translate your response to {language}."
+    
+    # Prepare the messages for the model
+    formatted_messages = []
+    
+    # Add system message
+    formatted_messages.append({"role": "system", "content": system_message})
+    
+    # Add chat history (limited to prevent context overflow)
+    for msg in history[-MAX_HISTORY_LENGTH:]:
+        formatted_messages.append({"role": msg["role"], "content": msg["message"]})
+    
+    # Add the new user message
+    for msg in messages:
+        formatted_messages.append({"role": "user", "content": msg.content})
+    
+    # Get the model
+    model = get_model(api_key)
+    
     try:
-        api_key = st.session_state.get('openai_api_key') or os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OpenAI API key is required")
-            
-        model = get_model(api_key)
-        
-        if session_id not in session_data:
-            set_session_language(session_id, "English")
-
-        if language:
-            set_session_language(session_id, language)
-        else:
-            language = session_data[session_id]["language"]
-
-        # Get chat history
-        history = get_chat_history_from_supabase(session_id)
-        
-        # Format messages for the model
-        formatted_messages = []
-        
-        # Add system message
-        system_message = f"""IMPORTANT: You are an AI assistant that MUST ALWAYS respond in {language} only.
-        
-        Core Rules:
-        1. ALWAYS respond in {language}, regardless of the input language
-        2. If you cannot translate something perfectly, explain it simply in {language}
-        3. Maintain conversation context and memory across language changes
-        4. Remember user details and preferences
-        5. Never switch to another language, even if explicitly asked
-        
-        Current conversation language: {language}
-        """
-        
-        formatted_messages.append(HumanMessage(content=system_message))
-        
-        # Add chat history
-        for msg in history[-MAX_HISTORY_LENGTH:]:
-            if msg["role"] == "user":
-                formatted_messages.append(HumanMessage(content=msg["message"]))
-            else:
-                formatted_messages.append(AIMessage(content=msg["message"]))
-        
-        # Add the current message
-        formatted_messages.append(HumanMessage(content=messages[0].content))
-
         # Create placeholder for streaming response
         placeholder = st.empty()
         full_response = ""
@@ -194,8 +177,8 @@ def invoke_with_language(session_id: str, messages, language=None):
         placeholder.markdown(full_response)
         
         return full_response
-
     except Exception as e:
         error_msg = f"Error generating response: {str(e)}"
         print(error_msg)
+        st.error(error_msg)
         return error_msg
