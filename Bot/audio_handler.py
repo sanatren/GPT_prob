@@ -10,12 +10,12 @@ import torch
 from transformers import pipeline
 import base64
 
-# Try to import the audio recorder, but provide a fallback if not available
+# Try to import the mic recorder, but provide a fallback if not available
 try:
-    from audio_recorder_streamlit import audio_recorder
-    AUDIO_RECORDER_AVAILABLE = True
+    from streamlit_mic_recorder import mic_recorder
+    MIC_RECORDER_AVAILABLE = True
 except ImportError:
-    AUDIO_RECORDER_AVAILABLE = False
+    MIC_RECORDER_AVAILABLE = False
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -31,57 +31,31 @@ class AudioHandler:
             
         self.api_key = api_key
         self.client = OpenAI(api_key=self.api_key)
-        self.whisper_model = None  # Lazy-load the model
-        
-    @staticmethod
-    @st.cache_resource
-    def load_whisper_model(_hf_token=None):
-        """Load the Whisper model (cached to avoid reloading)"""
-        try:
-            return pipeline(
-                "automatic-speech-recognition", 
-                model="openai/whisper-small",
-                chunk_length_s=30,
-                device=0 if torch.cuda.is_available() else -1,
-                token=_hf_token  # Pass token if available
-            )
-        except Exception as e:
-            st.warning(f"Failed to load Whisper model: {e}")
-            # Try with a smaller model as fallback
-            try:
-                return pipeline(
-                    "automatic-speech-recognition", 
-                    model="openai/whisper-tiny",
-                    chunk_length_s=30,
-                    device=0 if torch.cuda.is_available() else -1,
-                    token=_hf_token
-                )
-            except:
-                st.error("Could not load any Whisper model. Will use OpenAI API only.")
-                return None
         
     def record_audio(self, duration=5):
-        """Record audio using streamlit-audio-recorder or file uploader"""
+        """Record audio using streamlit-mic-recorder or file uploader"""
         st.write("### Voice Input")
         
-        # Check if audio recorder is available
-        if AUDIO_RECORDER_AVAILABLE:
+        # Check if mic recorder is available
+        if MIC_RECORDER_AVAILABLE:
             # Create tabs for different input methods
             tab1, tab2 = st.tabs(["Record Audio", "Upload Audio"])
             
             with tab1:
                 st.write("Click the microphone button below to start recording. Click again to stop.")
                 
-                # Add audio recorder component with compatible parameters
-                audio_bytes = audio_recorder(
-                    text="Click to record",
-                    recording_color="#e8b62c",
-                    neutral_color="#6aa36f"
+                # Add mic recorder component
+                audio_bytes = mic_recorder(
+                    key="voice_recorder",
+                    start_prompt="Click to start recording",
+                    stop_prompt="Click to stop recording",
+                    just_once=False,
+                    use_container_width=False
                 )
                 
                 if audio_bytes:
                     # Display audio player for the recorded audio
-                    st.audio(audio_bytes, format="audio/wav")
+                    st.audio(audio_bytes)
                     
                     # Save the recorded audio to a temporary file
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
@@ -117,9 +91,9 @@ class AudioHandler:
                     # Return the path to the saved file
                     return audio_path, None
         else:
-            # Fallback to just file upload if audio recorder is not available
+            # Fallback to just file upload if mic recorder is not available
             st.write("Upload an audio file (WAV, MP3, M4A)")
-            st.info("For a better experience, install the 'streamlit-audio-recorder' package to enable in-browser recording.")
+            st.info("For a better experience, install the 'streamlit-mic-recorder' package to enable in-browser recording.")
             
             # File uploader for audio
             uploaded_file = st.file_uploader("Upload audio file", 
@@ -170,7 +144,7 @@ class AudioHandler:
             if not audio_path or not os.path.exists(audio_path):
                 return None
             
-            # Skip local model and use OpenAI API directly for reliability
+            # Use OpenAI API for transcription
             with open(audio_path, "rb") as audio_file:
                 with st.spinner("Converting speech to text using OpenAI API..."):
                     transcript = self.client.audio.transcriptions.create(
@@ -189,33 +163,22 @@ class AudioHandler:
     def process_voice_input(self, duration=5):
         """Process voice input with minimal UI disruption"""
         try:
-            st.write("Starting voice input processing...")
             recording, sample_rate = self.record_audio(duration)
             if recording is None:
-                st.warning("No recording detected")
                 return None
-            
-            st.write(f"Recording received: {type(recording)}")
-            
+                
             # If recording is already a file path, use it directly
             if isinstance(recording, str) and os.path.exists(recording):
                 audio_path = recording
-                st.write(f"Using existing audio path: {audio_path}")
             else:
                 audio_path = self.save_audio(recording, sample_rate)
-                st.write(f"Saved audio to: {audio_path}")
-            
+                
             if audio_path is None:
-                st.warning("Failed to save audio")
                 return None
-            
-            st.write("Transcribing audio...")
+                
             transcript = self.transcribe_audio(audio_path)
-            st.write(f"Transcript result: {transcript}")
             return transcript
             
         except Exception as e:
             st.error(f"Voice input error: {str(e)}")
-            import traceback
-            st.error(traceback.format_exc())
             return None 
