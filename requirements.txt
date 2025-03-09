@@ -20,11 +20,13 @@ PyAudio
 sentence_transformers
 sounddevice
 soundfile
-
+python-docx>=0.8.11
 streamlit-webrtc>=0.47.9
 supabase
 torch
 transformers
 uvicorn
 wikipedia
-
+openpyxl>=3.0.10
+python-pptx>=0.6.21
+pdfplumber>=0.7.5
